@@ -1,0 +1,31 @@
+# Dev-only compose file — this project never leaves your laptop, so there is
+# intentionally no docker-compose.prod.yml, no image tagging scheme, and no
+# registry push step. See README.md "Running with Docker" for details.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    env_file:
+      - .env
+    environment:
+      - PORT=3001
+      - VITE_BACKEND_URL=http://localhost:3001
+      # Docker bind-mount file-change events are unreliable (esp. on
+      # Windows hosts) — polling keeps Vite's hot reload actually working.
+      - CHOKIDAR_USEPOLLING=true
+    ports:
+      - "5173:5173" # open http://localhost:5173 in your browser
+      - "3001:3001" # backend API, exposed for direct debugging (optional)
+    volumes:
+      - .:/app
+      # Anonymous volumes so the image's own node_modules (installed for
+      # linux/alpine) aren't shadowed by the host's bind-mounted ones.
+      - /app/node_modules
+      - /app/frontend/node_modules
+      # CRITICAL: bind mounts (not anonymous volumes) so the Excel file and
+      # dedup tracker land on your actual laptop filesystem and survive
+      # container restarts — seen_places.json lives inside this same folder,
+      # so one mount covers both.
+      - ./output:/app/output
