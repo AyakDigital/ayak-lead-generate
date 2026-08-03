@@ -19,7 +19,17 @@ function startRun({ cities, sectorJobs, maxCalls }) {
 
   const id = crypto.randomUUID();
   const emitter = new EventEmitter();
-  const run = { id, status: 'running', events: [], emitter, summary: null, error: null };
+  const run = {
+    id,
+    status: 'running',
+    events: [],
+    emitter,
+    summary: null,
+    error: null,
+    // kept for the per-run export filename (backend/routes.js)
+    cities,
+    sectorLabels: sectorJobs.map((j) => j.label),
+  };
   currentRun = run;
 
   const onEvent = (evt) => {

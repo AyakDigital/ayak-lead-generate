@@ -73,7 +73,17 @@ frontend (port 5173, with hot reload) via `concurrently`. Open:
 **http://localhost:5173**
 
 Select cities and sectors, click "Lancer la collecte", watch progress live,
-then click "Télécharger Excel" when it finishes.
+then two download options appear:
+- **"Télécharger les nouveaux leads de ce run"** — a small standalone
+  `.xlsx` (same header/columns/formatting) containing *only* the leads that
+  run just found, freshly numbered from 1. Doesn't touch the master file.
+- **"Télécharger le fichier complet"** — the same cumulative master file the
+  CLI uses (`./output/AYAK_Prospects_Tetouan_VIDE.xlsx`), unchanged
+  behavior.
+
+Only the most recent run's per-run export stays available (in-memory, no
+database) — download it before starting another run if you want to keep it;
+the master file has no such limit.
 
 Both `node collect.js` and `npm run dev` must be started **from the project
 root** — file paths for the output folder / tracker are resolved relative to
@@ -245,12 +255,15 @@ Edit `config.js` to change:
 - `placesApi.js` — Google Places API (New) calls (Text Search only, Pro
   tier). Exposes `createClient()`, not a singleton, so each run (CLI
   process or dashboard request) gets isolated call-budget state.
-- `excelWriter.js` / `dedupe.js` — unchanged from the CLI-only version,
-  reused as-is by the dashboard.
+- `excelWriter.js` / `dedupe.js` — reused as-is by the dashboard.
+  `excelWriter.js` additionally exposes `buildStandaloneWorkbook(leads)` (the
+  per-run export) and retries file writes a few times on Windows
+  EBUSY/EACCES/EPERM before failing with a diagnostic message.
 - `backend/server.js` — Express app; serves the API and (when built) the
   frontend static files.
 - `backend/routes.js` — `/health`, `/api/cities`, `/api/sectors`,
-  `/api/settings`, `/api/run` (SSE progress), `/api/download`.
+  `/api/settings`, `/api/run` (SSE progress), `/api/download` (master file),
+  `/api/run/:id/download` (that run's new leads only).
 - `backend/runManager.js` — in-memory single-run tracking + SSE event
   buffering for the dashboard.
 - `backend/placeTypesTableA.js` — the full Google Table A place-type catalog
@@ -278,6 +291,13 @@ Edit `config.js` to change:
   server→browser), not WebSockets — sufficient for this use case (no
   client→server messages needed after the run starts) and simpler to reason
   about/test.
+- The per-run export (`/api/run/:id/download`) is additive, not a
+  replacement for the master file download — the master cumulative file
+  remains the default, unchanged behavior, exactly as specified since the
+  original CLI brief ("append... never overwrite"). Confirmed with the user
+  directly before implementing, since a prior instruction file
+  (`FIX_LEADS_SCRAPER.md`) asked to replace the master download entirely,
+  which would have reversed that original spec.
 - Only one dashboard collection run at a time is supported (a second
   `POST /api/run` while one is in progress gets HTTP 409) — matches the
   brief's implicit single-user local-tool scope, and avoids two runs

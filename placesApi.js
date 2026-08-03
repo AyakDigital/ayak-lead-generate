@@ -95,6 +95,13 @@ function createClient(opts = {}) {
       if (includedType) body.includedType = includedType;
       if (pageToken) body.pageToken = pageToken;
 
+      // Exact outgoing request, every call — never logs the key itself, just
+      // whether one is set. Places API (New) has no legacy "status" field
+      // (OK/ZERO_RESULTS/INVALID_REQUEST) on success responses like the old
+      // Places API did; errors surface as non-2xx HTTP + a google.rpc.Status
+      // body, which the catch block below logs in full.
+      console.log(`  [places] requête: ${JSON.stringify(body)} (api_key présente: ${!!config.API_KEY})`);
+
       let data;
       try {
         stats.textSearchCalls++;
@@ -106,6 +113,7 @@ function createClient(opts = {}) {
           },
         });
         data = res.data;
+        console.log(`  [places] réponse: HTTP ${res.status}, ${(data.places || []).length} place(s), nextPageToken: ${!!data.nextPageToken}`);
       } catch (err) {
         stats.apiErrors++;
         console.error(`  [erreur] Text Search "${textQuery}"${includedType ? ` (${includedType})` : ''}: ${describeError(err)}`);

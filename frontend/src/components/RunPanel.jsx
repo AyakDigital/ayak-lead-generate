@@ -1,11 +1,11 @@
 function formatEvent(evt) {
   switch (evt.type) {
     case 'start':
-      return `Démarrage — tier Pro uniquement, budget ${evt.maxCalls} appels max.`;
+      return `Démarrage — tier Pro uniquement, budget ${evt.maxCalls} appels max. Clé API présente : ${evt.apiKeyPresent ? 'oui' : 'NON — voir .env'}.`;
     case 'searching':
-      return `[${evt.city}] ${evt.sector} — recherche en cours…`;
+      return `[${evt.city}] ${evt.sector} — requête: textQuery="${evt.request.textQuery}"${evt.request.includedType ? `, includedType="${evt.request.includedType}"` : ''}`;
     case 'searchResult':
-      return `  ${evt.count} résultat(s) trouvé(s) pour ${evt.sector} (${evt.city})`;
+      return `  → ${evt.count} résultat(s) pour ${evt.sector} (${evt.city})`;
     case 'lead':
       return `  + [${evt.count}] ${evt.name}`;
     case 'duplicate':
@@ -31,6 +31,7 @@ export default function RunPanel({
   events,
   summary,
   downloadUrl,
+  runDownloadUrl,
   selectedCitiesCount,
   selectedSectorsCount,
 }) {
@@ -82,8 +83,14 @@ export default function RunPanel({
             <li>Appels API (Text Search) : {summary.textSearchCalls}</li>
             <li>Erreurs : {summary.apiErrors}</li>
           </ul>
-          <a className="download-button" href={downloadUrl} download>
-            Télécharger Excel
+          {summary.newLeads > 0 && runDownloadUrl && (
+            <a className="download-button" href={runDownloadUrl} download>
+              Télécharger les nouveaux leads de ce run ({summary.newLeads})
+            </a>
+          )}
+
+          <a className="download-button download-button-secondary" href={downloadUrl} download>
+            Télécharger le fichier complet ({summary.totalLeadsInFile} leads au total)
           </a>
         </div>
       )}

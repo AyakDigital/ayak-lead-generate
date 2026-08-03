@@ -2,8 +2,27 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const config = require('../config');
-const { getSectorCatalog } = require('./placeTypesTableA');
+const excel = require('../excelWriter');
+const { getSectorCatalog, labelForType } = require('./placeTypesTableA');
 const runManager = require('./runManager');
+
+// "Voyage Agency-M'diq-Tétouan_2026-08-03.xlsx" — strip accents/anything
+// filesystem-unfriendly, keep it short and readable.
+function slugForFilename(str) {
+  return str
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function buildRunExportFilename(run) {
+  const date = new Date().toISOString().slice(0, 10);
+  const cities = (run.cities || []).map((c) => slugForFilename(c.split(',')[0]));
+  const sectors = run.sectorLabels || [];
+  const sectorPart = sectors.length === 1 ? slugForFilename(sectors[0]) : `${sectors.length}secteurs`;
+  return `leads_${sectorPart}_${cities.join('-') || 'villes'}_${date}.xlsx`;
+}
 
 const router = express.Router();
 
@@ -41,10 +60,20 @@ router.post('/api/run', (req, res) => {
     return res.status(400).json({ error: `Ville(s) invalide(s): ${invalidCities.join(', ')}` });
   }
 
-  const sectorJobs = sectors.map((type) => ({
-    label: config.TYPE_LABELS[type] || type,
-    buildRequest: (city) => ({ textQuery: city, includedType: type }),
-  }));
+  // textQuery must be a categorical phrase, not a bare location — Google's
+  // Text Search docs are explicit that includedType filtering "does not
+  // apply to geopolitical queries" (a bare city name is exactly that), so
+  // `textQuery: city, includedType: type` silently ignores the type filter
+  // and searches for nothing meaningful. includedType still narrows/biases
+  // results on top of the categorical phrase, same as the CLI's plain-text
+  // approach with an added precision filter.
+  const sectorJobs = sectors.map((type) => {
+    const label = labelForType(type);
+    return {
+      label,
+      buildRequest: (city) => ({ textQuery: `${label} à ${city}`, includedType: type }),
+    };
+  });
 
   try {
     const run = runManager.startRun({
@@ -92,12 +121,37 @@ router.get('/api/run/:id/events', (req, res) => {
   req.on('close', () => run.emitter.off('event', listener));
 });
 
+// Master cumulative file (every lead ever collected, CLI + dashboard combined).
 router.get('/api/download', (req, res) => {
   const filePath = path.resolve(config.OUTPUT_XLSX);
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: "Aucun fichier de sortie pour l'instant — lancez une collecte d'abord." });
   }
   res.download(filePath, 'AYAK_Prospects_Tetouan_VIDE.xlsx');
+});
+
+// Standalone export of ONLY this run's new leads — separate from, and never
+// reads or modifies, the master cumulative file above.
+router.get('/api/run/:id/download', async (req, res) => {
+  const run = runManager.getRun(req.params.id);
+  if (!run || run.status !== 'done') {
+    return res.status(404).json({ error: 'Export indisponible pour ce run (introuvable ou pas encore terminé).' });
+  }
+  const leads = (run.summary && run.summary.leads) || [];
+  if (leads.length === 0) {
+    return res.status(404).json({ error: 'Aucun nouveau lead dans ce run — rien à exporter.' });
+  }
+
+  try {
+    const workbook = await excel.buildStandaloneWorkbook(leads);
+    const filename = buildRunExportFilename(run);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

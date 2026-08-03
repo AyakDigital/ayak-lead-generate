@@ -16,6 +16,7 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [status, setStatus] = useState('idle'); // idle | running | done | error
   const [summary, setSummary] = useState(null);
+  const [runId, setRunId] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [startError, setStartError] = useState(null);
 
@@ -39,10 +40,12 @@ export default function App() {
     setStartError(null);
     setEvents([]);
     setSummary(null);
+    setRunId(null);
     setStatus('running');
     try {
-      const { runId } = await startRun({ cities: selectedCities, sectors: selectedSectors, maxCalls });
-      const unsubscribe = subscribeToRun(runId, (evt) => {
+      const { runId: newRunId } = await startRun({ cities: selectedCities, sectors: selectedSectors, maxCalls });
+      setRunId(newRunId);
+      const unsubscribe = subscribeToRun(newRunId, (evt) => {
         setEvents((prev) => [...prev, evt]);
         if (evt.type === 'done') {
           setStatus('done');
@@ -99,6 +102,7 @@ export default function App() {
             events={events}
             summary={summary}
             downloadUrl={downloadUrl()}
+            runDownloadUrl={runId ? `/api/run/${runId}/download` : null}
             selectedCitiesCount={selectedCities.length}
             selectedSectorsCount={selectedSectors.length}
           />

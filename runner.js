@@ -33,10 +33,15 @@ async function runCollection({ cities, sectorJobs, maxCalls, onEvent }) {
   let { nextRow, nextNumero } = excel.findStartingPoint(worksheet);
 
   const summary = { newLeads: 0, duplicatesSkipped: 0 };
+  // Raw records for just this run's new leads (independent of the master
+  // file's row numbers) — lets callers (the dashboard) offer a standalone
+  // per-run export without touching or re-reading the cumulative master file.
+  const leadsThisRun = [];
 
   emit({
     type: 'start',
     fieldMask: placesApi.TEXT_SEARCH_FIELD_MASK,
+    apiKeyPresent: Boolean(config.API_KEY),
     maxCalls: places.maxCalls,
     cities,
     sectorCount: sectorJobs.length,
@@ -68,13 +73,15 @@ async function runCollection({ cities, sectorJobs, maxCalls, onEvent }) {
           (place.types || []).map((t) => config.TYPE_LABELS[t]).find(Boolean) ||
           job.label;
 
-        excel.appendRow(worksheet, nextRow, {
-          numero: nextNumero,
+        const leadRecord = {
           entreprise: place.name,
           secteur,
           adresse: place.formattedAddress || '',
           telephone: null, // not collected — Pro tier only, see README "Cost Safety"
-        });
+        };
+
+        excel.appendRow(worksheet, nextRow, { ...leadRecord, numero: nextNumero });
+        leadsThisRun.push(leadRecord);
 
         dedupe.markSeen(tracking, place);
 
@@ -98,8 +105,12 @@ async function runCollection({ cities, sectorJobs, maxCalls, onEvent }) {
   summary.textSearchCalls = places.stats.textSearchCalls;
   summary.apiErrors = places.stats.apiErrors;
   summary.outputFile = config.OUTPUT_XLSX;
+  summary.leads = leadsThisRun;
 
-  emit({ type: 'done', summary });
+  // The browser doesn't need the raw lead records over SSE (it fetches the
+  // per-run export as a file instead) — keep the event payload small.
+  const { leads, ...publicSummary } = summary;
+  emit({ type: 'done', summary: publicSummary });
 
   return summary;
 }

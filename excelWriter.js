@@ -4,8 +4,53 @@
 // Statut d'appel dropdown validations.
 // ---------------------------------------------------------------------------
 const fs = require('fs');
+const path = require('path');
 const ExcelJS = require('exceljs');
 const config = require('./config');
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientFsError(err) {
+  return err && (err.code === 'EBUSY' || err.code === 'EACCES' || err.code === 'EPERM');
+}
+
+// Wraps a file-writing operation with a few retries — Windows locking
+// (antivirus scan, OneDrive sync, the file open in Excel) is often
+// transient and clears within a second or two. If it's still failing after
+// retries, replace the raw fs error with one that actually helps diagnose
+// it, since "EACCES: permission denied, open '...'" alone gives no next step.
+async function withRetry(fn, { attempts = 3, delayMs = 500 } = {}) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i === attempts || !isTransientFsError(err)) {
+        if (isTransientFsError(err)) throw enhanceFsError(err);
+        throw err;
+      }
+      await sleep(delayMs);
+    }
+  }
+}
+
+function enhanceFsError(err) {
+  const absPath = path.resolve(config.OUTPUT_XLSX);
+  const enhanced = new Error(
+    `${err.code}: impossible d'écrire ${absPath}.\n` +
+      'Causes possibles :\n' +
+      "  - le fichier est ouvert dans Excel ou un autre programme (fermez-le et réessayez)\n" +
+      '  - antivirus / OneDrive verrouille temporairement le fichier pendant une synchronisation\n' +
+      "  - permissions Windows insuffisantes pour le compte qui exécute ce process — sur cette machine, " +
+      "vérifiez avec `icacls \"" +
+      path.dirname(absPath) +
+      '"` si votre compte/groupe a bien un accès en écriture (M ou F), pas seulement RX'
+  );
+  enhanced.code = err.code;
+  enhanced.cause = err;
+  return enhanced;
+}
 
 function ensureOutputCopy() {
   fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
@@ -17,7 +62,7 @@ function ensureOutputCopy() {
 
 async function openWorksheet() {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(config.OUTPUT_XLSX);
+  await withRetry(() => workbook.xlsx.readFile(config.OUTPUT_XLSX));
   const worksheet = workbook.getWorksheet(config.SHEET_NAME);
   if (!worksheet) {
     throw new Error(`Feuille "${config.SHEET_NAME}" introuvable dans ${config.OUTPUT_XLSX}`);
@@ -74,7 +119,32 @@ function appendRow(worksheet, rowNumber, lead) {
 }
 
 async function save(workbook) {
-  await workbook.xlsx.writeFile(config.OUTPUT_XLSX);
+  await withRetry(() => workbook.xlsx.writeFile(config.OUTPUT_XLSX));
 }
 
-module.exports = { ensureOutputCopy, openWorksheet, findStartingPoint, appendRow, save };
+// Builds a fresh, standalone workbook (same header style/columns/dropdowns
+// as the master file, via the blank template) containing ONLY the given
+// leads, freshly numbered from 1. Used for the dashboard's "download just
+// this run's new leads" export — the master cumulative file (config.OUTPUT_XLSX)
+// is never read or modified by this function.
+async function buildStandaloneWorkbook(leads) {
+  const workbook = new ExcelJS.Workbook();
+  await withRetry(() => workbook.xlsx.readFile(config.SOURCE_XLSX));
+  const worksheet = workbook.getWorksheet(config.SHEET_NAME);
+  if (!worksheet) {
+    throw new Error(`Feuille "${config.SHEET_NAME}" introuvable dans ${config.SOURCE_XLSX}`);
+  }
+  leads.forEach((lead, i) => {
+    appendRow(worksheet, i + 2, { ...lead, numero: i + 1 });
+  });
+  return workbook;
+}
+
+module.exports = {
+  ensureOutputCopy,
+  openWorksheet,
+  findStartingPoint,
+  appendRow,
+  save,
+  buildStandaloneWorkbook,
+};

@@ -192,13 +192,20 @@ function formatLabel(type) {
     .join(' ');
 }
 
+// Single source of truth for "what do we call this type" — used both for
+// the catalog labels shown in the UI and for building the actual search
+// query text (routes.js), so they never drift apart.
+function labelForType(type) {
+  return config.TYPE_LABELS[type] || formatLabel(type);
+}
+
 function getSectorCatalog() {
   return Object.entries(RAW_CATEGORIES).map(([category, types]) => ({
     category: CATEGORY_LABELS_FR[category] || category,
     types: types
-      .map((value) => ({ value, label: config.TYPE_LABELS[value] || formatLabel(value) }))
+      .map((value) => ({ value, label: labelForType(value) }))
       .sort((a, b) => a.label.localeCompare(b.label)),
   }));
 }
 
-module.exports = { getSectorCatalog };
+module.exports = { getSectorCatalog, labelForType };
